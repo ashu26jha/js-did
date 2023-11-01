@@ -412,6 +412,33 @@ export class DID {
   }
 }
 
+export type VerifyJWSParameters = {
+  /**
+   * JS timestamp when the signature was allegedly made. `undefined` means _now_.
+   */
+  atTime?: Date
+
+  /**
+   * If true, timestamp checking is disabled.
+   */
+  disableTimecheck?: boolean
+
+  /**
+   * DID that issued the signature.
+   */
+  issuer?: string
+
+  /**
+   * Cacao OCAP to verify the JWS with.
+   */
+  capability?: Cacao
+
+  /**
+   * Number of seconds that a revoked key stays valid for after it was revoked
+   */
+  revocationPhaseOutSecs?: number
+}
+
 export type VerifyCacaoParameters = {
   /**
    * @param atTime - the point in time the capability is being verified for
@@ -432,14 +459,14 @@ export type VerifyCacaoParameters = {
   disableExpirationCheck?: boolean
 }
 
-export type VerifyJWSParameters = {
+export type VerifyJWSUsingParameters = {
   resolve: (url: string) => Promise<DIDResolutionResult>
   verifyCacao: (cacao: Cacao, opts: VerifyCacaoParameters) => Promise<void>
   jws: string | DagJWS
-  options?: VerifyJWSOptions
+  options: VerifyJWSParameters
 }
 
-export async function verifyJWSUsing(params: VerifyJWSParameters): Promise<VerifyJWSResult> {
+export async function verifyJWSUsing(params: VerifyJWSUsingParameters): Promise<VerifyJWSResult> {
   let jws = params.jws
   const options = params.options || {}
   if (typeof jws !== 'string') jws = fromDagJWS(jws)
@@ -490,10 +517,9 @@ export async function verifyJWSUsing(params: VerifyJWSParameters): Promise<Verif
       options.capability.p.aud === signerDid &&
       controllers.includes(options.capability.p.iss)
     ) {
-      await Cacao.verify(options.capability, {
+      await params.verifyCacao(options.capability, {
         atTime: options.atTime ? options.atTime : undefined,
         revocationPhaseOutSecs: options.revocationPhaseOutSecs,
-        verifiers: options.verifiers ?? {},
       })
     } else {
       const signerIsController = signerDid ? controllers.includes(signerDid) : false
