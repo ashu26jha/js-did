@@ -3,7 +3,7 @@ import { createJWE, JWE, verifyJWS, resolveX25519Encrypters } from 'did-jwt'
 import { encodePayload, prepareCleartext, decodeCleartext } from 'dag-jose-utils'
 import { RPCClient } from 'rpc-utils'
 import { CID } from 'multiformats/cid'
-import { CacaoBlock, Cacao, Verifiers } from '@didtools/cacao'
+import { CacaoBlock, Cacao, Verifiers, VerifyOptions } from '@didtools/cacao'
 import { getEIP191Verifier } from '@didtools/pkh-ethereum'
 import type { DagJWS, GeneralJWS } from '@didtools/codecs'
 import type { DIDProvider, DIDProviderClient } from './types.js'
@@ -324,6 +324,13 @@ export class DID {
   async verifyJWS(jws: string | DagJWS, options: VerifyJWSOptions = {}): Promise<VerifyJWSResult> {
     return verifyJWSUsing({
       resolve: this.resolve.bind(this),
+      verifyCacao: (cacao: Cacao, opts: VerifyCacaoParameters) => {
+        const cacaoOpts: VerifyOptions = {
+          verifiers: options.verifiers || verifiers,
+          ...opts,
+        }
+        return Cacao.verify(cacao, cacaoOpts)
+      },
       jws: jws,
       options: options,
     })
@@ -405,16 +412,36 @@ export class DID {
   }
 }
 
+export type VerifyCacaoParameters = {
+  /**
+   * @param atTime - the point in time the capability is being verified for
+   */
+  atTime?: Date
+  /**
+   * @param expPhaseOutSecs - Number of seconds that a capability stays valid for after it was expired
+   */
+  revocationPhaseOutSecs?: number
+  /**
+   * @param clockSkewSecs - Number of seconds of clock tolerance when verifying iat, nbf, and exp
+   */
+  clockSkewSecs?: number
+
+  /**
+   * @param disableExpirationCheck - Do not verify expiration time
+   */
+  disableExpirationCheck?: boolean
+}
+
 export type VerifyJWSParameters = {
   resolve: (url: string) => Promise<DIDResolutionResult>
+  verifyCacao: (cacao: Cacao, opts: VerifyCacaoParameters) => Promise<void>
   jws: string | DagJWS
   options?: VerifyJWSOptions
 }
 
 export async function verifyJWSUsing(params: VerifyJWSParameters): Promise<VerifyJWSResult> {
   let jws = params.jws
-  let options = params.options
-  options = Object.assign({ verifiers }, options)
+  const options = params.options || {}
   if (typeof jws !== 'string') jws = fromDagJWS(jws)
   const kid = base64urlToJSON(jws.split('.')[0]).kid as string
   if (!kid) throw new Error('No "kid" found in jws')
@@ -447,12 +474,10 @@ export async function verifyJWSUsing(params: VerifyJWSParameters): Promise<Verif
     options.issuer === options.capability?.p.iss &&
     signerDid === options.capability.p.aud
   ) {
-    if (!options.verifiers) throw new Error('Registered verifiers needed for CACAO')
-    await Cacao.verify(options.capability, {
+    await params.verifyCacao(options.capability, {
       disableExpirationCheck: options.disableTimecheck,
       atTime: options.atTime ? options.atTime : undefined,
       revocationPhaseOutSecs: options.revocationPhaseOutSecs,
-      verifiers: options.verifiers ?? {},
     })
   } else if (options.issuer && options.issuer !== signerDid) {
     const issuerUrl = didWithTime(options.issuer, options.atTime)
